@@ -1,0 +1,19 @@
+{
+  "name": "gaeseon-opl",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "개선OPL",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js --open",
+    "serve": "node server.js"
+  },
+  "dependencies": {
+    "three": "0.170.0",
+    "ws": "8.18.0"
+  }
+}

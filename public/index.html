@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>개선OPL</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232b6cb0'/%3E%3Ctext x='16' y='22' font-size='14' font-family='Arial' font-weight='700' text-anchor='middle' fill='white'%3EOPL%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <script type="importmap">{ "imports": { "three": "/lib/three.module.js" } }</script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="labels"></div>
+
+  <div id="hud" class="hidden">
+    <canvas id="minimap" width="176" height="176"></canvas>
+    <div id="topinfo"><span id="floor">1F</span><span id="pcount">0명</span><span id="ping">-- ms</span></div>
+    <div id="killfeed"></div>
+    <div id="notice"></div>
+
+    <div id="chat">
+      <div id="chatlog"></div>
+      <input id="chatinput" maxlength="100" placeholder="메시지 입력 후 Enter" autocomplete="off">
+    </div>
+
+    <div id="hpbox">
+      <div class="hpnum"><span id="hpval">100</span><small>HP</small></div>
+      <div class="hpbar"><i id="hpfill"></i></div>
+    </div>
+
+    <div id="invwrap">
+      <div id="hint"></div>
+      <div id="inv">
+        <div class="slot" data-i="0"><b class="key">1</b><span class="wname">-</span><span class="ammo"></span></div>
+        <div class="slot" data-i="1"><b class="key">2</b><span class="wname">-</span><span class="ammo"></span></div>
+        <div class="slot" data-i="2"><b class="key">3</b><span class="wname">-</span><span class="ammo"></span></div>
+      </div>
+      <div id="wstats"></div>
+    </div>
+
+    <div id="keys">WASD 이동 · 좌클릭 발사 · 1/2/3 무기 · R 재장전 · E 줍기/교체 · 우클릭 멀리보기 · 휠 줌 · Tab 점수 · Enter 채팅</div>
+
+    <div id="crosshair"><i></i><i></i><i></i><i></i><b id="hitmark"></b><div id="reloadring"><div id="reloadfill"></div></div></div>
+    <div id="vignette"></div>
+    <div id="death" class="hidden"><div class="dtitle">사망</div><div id="deathby"></div><div id="deathtimer"></div></div>
+
+    <div id="scoreboard" class="hidden">
+      <h2>점수판</h2>
+      <table><thead><tr><th>이름</th><th>처치</th><th>사망</th></tr></thead><tbody id="scorebody"></tbody></table>
+    </div>
+  </div>
+
+  <div id="login">
+    <div class="card">
+      <h1>개선OPL</h1>
+      <p class="sub">쿼터뷰 멀티플레이</p>
+      <input id="nameinput" maxlength="12" placeholder="이름 (최대 12자)" autocomplete="off">
+      <button id="joinbtn">입장</button>
+      <div id="loginmsg"></div>
+      <ul class="howto">
+        <li><b>WASD</b> 이동 · <b>마우스</b> 조준 · <b>좌클릭</b> 발사</li>
+        <li>바닥의 총을 밟으면 인벤토리(최대 3칸)에 들어갑니다</li>
+        <li><b>1 2 3</b> 무기 교체 · <b>R</b> 재장전 · <b>E</b> 가득 찼을 때 바닥 총과 교체</li>
+        <li>총마다 <b>데미지와 사거리</b>가 다릅니다 (발밑 원 = 사거리)</li>
+        <li>상자·벽 뒤에 숨으면 상대에게 보이지 않고 총알도 막힙니다</li>
+        <li><b>계단</b>으로 건물 옥상(2층)과 다리로 올라갈 수 있습니다</li>
+        <li>다른 층의 적은 마우스를 적 위에 올리면 조준됩니다</li>
+      </ul>
+    </div>
+  </div>
+
+  <script type="module" src="/client.js"></script>
+</body>
+</html>
