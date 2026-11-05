@@ -204,5 +204,20 @@ html, body {
 #joinbtn:hover { filter: brightness(1.1); }
 #joinbtn:disabled { opacity: .5; cursor: default; }
 #loginmsg { min-height: 20px; margin-top: 8px; font-size: 13px; color: var(--danger); }
+/* ── 초대 주소 (서버를 켠 PC에서만 보임) ── */
+.invite {
+  margin-top: 14px; padding: 10px 12px; text-align: left; border-radius: 10px;
+  background: rgba(90, 169, 255, .1); border: 1px solid rgba(90, 169, 255, .35); pointer-events: auto;
+}
+.invite .ititle { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.invite .irow {
+  display: flex; gap: 8px; align-items: baseline; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.invite .irow:hover { background: rgba(255,255,255,.07); }
+.invite .irow.pending { cursor: default; }
+.invite .ilabel { flex: none; width: 78px; color: var(--muted); font-size: 12px; }
+.invite .iurl { font-family: Consolas, 'D2Coding', monospace; color: #cfe6ff; word-break: break-all; }
+.invite .irow.copied .iurl { color: var(--ok); }
+#scoreboard .invite { margin-top: 16px; }
 .howto { text-align: left; margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.75; }
 .howto b { color: var(--text); }

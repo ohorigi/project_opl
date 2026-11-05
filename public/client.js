@@ -1278,6 +1278,50 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
+/* ═════════════════════════ 초대 주소 (서버를 켠 PC에서만) ═════════════════════════ */
+function renderInvite(info) {
+  const rows = [];
+  if (info.tunnelMode) rows.push(['인터넷', info.tunnel]);
+  for (const a of info.lan || []) rows.push(['같은 네트워크', a]);
+  for (const box of document.querySelectorAll('.invite')) {
+    box.textContent = '';
+    const title = document.createElement('div');
+    title.className = 'ititle';
+    title.textContent = '친구 초대 주소 — 클릭하면 복사됩니다';
+    box.appendChild(title);
+    for (const [label, url] of rows) {
+      const row = document.createElement('div');
+      row.className = 'irow' + (url ? '' : ' pending');
+      const l = document.createElement('span');
+      l.className = 'ilabel';
+      l.textContent = label;
+      const u = document.createElement('span');
+      u.className = 'iurl';
+      u.textContent = url || '주소 만드는 중...';
+      row.append(l, u);
+      if (url) {
+        row.addEventListener('mousedown', (e) => e.stopPropagation());
+        row.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(url); } catch { return; }
+          row.classList.add('copied');
+          u.textContent = '복사됨!';
+          setTimeout(() => { row.classList.remove('copied'); u.textContent = url; }, 1200);
+        });
+      }
+      box.appendChild(row);
+    }
+    box.classList.toggle('hidden', rows.length === 0);
+  }
+}
+async function refreshInvite() {
+  let info;
+  try { info = await (await fetch('/api/info', { cache: 'no-store' })).json(); } catch { return; }
+  if (!info.host) return;
+  renderInvite(info);
+  if (info.tunnelMode && !info.tunnel) setTimeout(refreshInvite, 2000);
+}
+refreshInvite();
+
 /* ═════════════════════════ 로그인 ═════════════════════════ */
 const nameInput = $('nameinput');
 const joinBtn = $('joinbtn');
