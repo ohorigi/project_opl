@@ -23,7 +23,18 @@ const S = {
   fs: 0, ack: 0, ping: 0,
   remotes: new Map(), roster: new Map(), pickups: new Map(),
   nextFireAt: 0, lastReloadReq: 0, lastSend: 0, killerName: '',
+  name: '', clockOff: null, reconnectTries: 0,
 };
+// 탭마다 고유한 키: 연결이 끊겼다 다시 붙으면 서버가 점수/색을 이어줌
+const SESSION_KEY = (() => {
+  let k = null;
+  try { k = sessionStorage.getItem('opl_key'); } catch { /* 저장소 사용 불가 */ }
+  if (!k) {
+    k = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { sessionStorage.setItem('opl_key', k); } catch { /* 무시 */ }
+  }
+  return k;
+})();
 const keys = new Set();
 const mouse = { x: innerWidth / 2, y: innerHeight / 2, left: false, right: false };
 let chatOpen = false;
@@ -521,27 +532,67 @@ function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}`);
     S.ws = ws;
-    ws.onopen = () => { S.connected = true; resolve(); };
-    ws.onerror = () => reject(new Error('connect failed'));
-    ws.onclose = () => {
+    let opened = false;
+    ws.onopen = () => { opened = true; S.connected = true; resolve(); };
+    ws.onerror = () => { if (!opened) reject(new Error('connect failed')); };
+    ws.onclose = (e) => {
+      if (S.ws !== ws) return;
       S.connected = false;
-      if (S.joined) {
-        S.joined = false;
-        $('hud').classList.add('hidden');
-        $('login').classList.remove('hidden');
-        $('joinbtn').disabled = true;
-        $('loginmsg').textContent = '서버 연결이 끊어졌습니다. 새로고침(F5) 해주세요.';
-      }
+      if (opened && S.joined) startReconnect(e.code);
     };
     ws.onmessage = (e) => {
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
-      onMessage(m);
+      try { onMessage(m); } catch (err) { console.error('message error', m.type, err); }
     };
   });
 }
 function send(m) {
   if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(m));
+}
+
+/* ── 자동 재연결: 잠깐 끊겨도 튕기지 않고 다시 붙음 ── */
+const RECONNECT_MAX = 15;
+function resetWorld() {
+  for (const r of S.remotes.values()) { disposeAvatar(r.av); r.tag.el.remove(); }
+  S.remotes.clear();
+  for (const pk of S.pickups.values()) { disposeGroup(pk.model.group); pk.label.remove(); }
+  S.pickups.clear();
+  S.fs = 0;
+  S.ack = 0;
+  S.clockOff = null;
+  S.reloadEnd = 0;
+  me.alive = false;
+  keys.clear();
+  mouse.left = false;
+}
+function startReconnect(code) {
+  resetWorld();
+  S.reconnectTries = 0;
+  $('reconnect').classList.remove('hidden');
+  tryReconnect(code);
+}
+async function tryReconnect(code) {
+  S.reconnectTries++;
+  $('reconnectmsg').textContent = `연결이 끊겨 다시 연결하는 중... (${S.reconnectTries}/${RECONNECT_MAX})`;
+  try {
+    await connect();
+  } catch {
+    if (S.reconnectTries >= RECONNECT_MAX) { giveUpReconnect(code); return; }
+    setTimeout(() => tryReconnect(code), Math.min(4000, 500 * 2 ** (S.reconnectTries - 1)));
+    return;
+  }
+  send({ type: 'join', name: S.name, key: SESSION_KEY });
+  $('reconnect').classList.add('hidden');
+  addChat(null, null, '다시 연결되었습니다');
+}
+function giveUpReconnect(code) {
+  $('reconnect').classList.add('hidden');
+  S.joined = false;
+  $('hud').classList.add('hidden');
+  $('login').classList.remove('hidden');
+  $('joinbtn').disabled = false;
+  $('loginmsg').textContent = `서버에 다시 연결하지 못했습니다 (코드 ${code}). 서버가 켜져 있는지 확인하고 다시 입장하세요.`;
 }
 setInterval(() => { if (S.joined) send({ type: 'ping', t: performance.now() }); }, 2000);
 
@@ -565,6 +616,10 @@ function onMessage(m) {
       S.roster.clear();
       for (const p of m.list) S.roster.set(p.id, p);
       for (const r of S.remotes.values()) setAvatarColor(r.av, colorOf(r.id));
+      if (S.roster.has(S.myId) && S.roster.get(S.myId).color !== S.myColor) {
+        S.myColor = S.roster.get(S.myId).color; // 재접속 시 원래 색으로 복구
+        if (myAv) setAvatarColor(myAv, S.myColor);
+      }
       if (!$('scoreboard').classList.contains('hidden')) renderScoreboard();
       $('pcount').textContent = `${m.list.length}명 접속`;
       break;
@@ -613,8 +668,17 @@ function onMessage(m) {
   }
 }
 
+// 서버 시계 추정: 가장 빨리 도착한 스냅샷 기준으로 빠르게 맞추고, 늦게 오면 천천히 따라감
+function updateClock(serverT, now) {
+  const sample = serverT - now;
+  if (S.clockOff === null) S.clockOff = sample;
+  else if (sample > S.clockOff) S.clockOff += (sample - S.clockOff) * 0.3;
+  else S.clockOff += (sample - S.clockOff) * 0.01;
+}
+
 function onSnap(m) {
   const now = performance.now();
+  updateClock(m.t, now);
   const seen = new Set();
   for (const a of m.ps) {
     const [id, x, y, z, yaw, hp, alive, wi, prot] = a;
@@ -629,13 +693,19 @@ function onSnap(m) {
     let r = S.remotes.get(id);
     if (!r) {
       r = {
-        id, x, y, z, yaw, tx: x, ty: y, tz: z, tyaw: yaw, hp, alive: !!alive, prot: !!prot,
+        id, x, y, z, yaw, buf: [], hp, alive: !!alive, prot: !!prot,
         av: makeAvatar(colorOf(id), false), tag: makeTag(false), vis: 0,
       };
       S.remotes.set(id, r);
     }
-    if ((!r.alive && alive) || Math.hypot(x - r.x, y - r.y) > 6) { r.x = x; r.y = y; r.z = z; r.vis = 0; }
-    r.tx = x; r.ty = y; r.tz = z; r.tyaw = yaw;
+    const last = r.buf[r.buf.length - 1];
+    // 부활/순간이동이면 보간하지 않고 바로 그 위치로
+    if ((!r.alive && alive) || (last && Math.hypot(x - last.x, y - last.y) > 6)) {
+      r.buf.length = 0;
+      r.x = x; r.y = y; r.z = z; r.yaw = yaw; r.vis = 0;
+    }
+    r.buf.push({ t: m.t, x, y, z, yaw });
+    while (r.buf.length > 2 && r.buf[1].t < m.t - 1000) r.buf.shift();
     r.hp = hp; r.alive = !!alive; r.prot = !!prot;
     setAvatarWeapon(r.av, wi >= 0 ? WK[wi] : null);
   }
@@ -1144,13 +1214,39 @@ function updateLocal(dt, now) {
   setAvatarOpacity(myAv, op);
 }
 
+// 다른 플레이어는 약간(INTERP_MS) 과거 시점을 두 스냅샷 사이로 보간해서 그림
+// → 인터넷에서 패킷이 불규칙하게 와도 끊기지 않고 부드럽게 움직임
+const INTERP_MS = 120;
+function sampleRemote(r, renderT) {
+  const b = r.buf;
+  if (!b.length) return;
+  if (renderT <= b[0].t || b.length === 1) { const s = b[0]; r.x = s.x; r.y = s.y; r.z = s.z; r.yaw = s.yaw; return; }
+  const lastS = b[b.length - 1];
+  if (renderT >= lastS.t) {
+    // 데이터가 늦으면 최대 150ms까지만 이어서 예측, 그 뒤엔 멈춤
+    const prev = b[b.length - 2];
+    const span = lastS.t - prev.t || 1;
+    const a = Math.min(renderT - lastS.t, 150) / span;
+    r.x = lastS.x + (lastS.x - prev.x) * a;
+    r.y = lastS.y + (lastS.y - prev.y) * a;
+    r.z = lastS.z;
+    r.yaw = lastS.yaw;
+    return;
+  }
+  let i = b.length - 2;
+  while (i > 0 && b[i].t > renderT) i--;
+  const s0 = b[i], s1 = b[i + 1];
+  const a = (renderT - s0.t) / (s1.t - s0.t || 1);
+  r.x = s0.x + (s1.x - s0.x) * a;
+  r.y = s0.y + (s1.y - s0.y) * a;
+  r.z = s0.z + (s1.z - s0.z) * a;
+  r.yaw = angleLerp(s0.yaw, s1.yaw, a);
+}
+
 function updateRemotes(dt, now) {
-  const k = 1 - Math.exp(-dt * 15);
+  const renderT = S.clockOff === null ? 0 : now + S.clockOff - INTERP_MS;
   for (const r of S.remotes.values()) {
-    r.x += (r.tx - r.x) * k;
-    r.y += (r.ty - r.y) * k;
-    r.z += (r.tz - r.z) * k;
-    r.yaw = angleLerp(r.yaw, r.tyaw, k);
+    sampleRemote(r, renderT);
     // 시야(벽/상자에 가려지면 안 보임)
     let target = r.alive ? 1 : 0;
     if (r.alive && S.joined && me.alive) {
@@ -1326,6 +1422,9 @@ refreshInvite();
 const nameInput = $('nameinput');
 const joinBtn = $('joinbtn');
 try { nameInput.value = localStorage.getItem('opl_name') || ''; } catch { /* 저장소 사용 불가 */ }
+if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) {
+  $('mobilewarn').classList.remove('hidden');
+}
 nameInput.focus();
 
 async function join() {
@@ -1342,7 +1441,8 @@ async function join() {
   }
   const name = nameInput.value.trim();
   try { localStorage.setItem('opl_name', name); } catch { /* 무시 */ }
-  send({ type: 'join', name });
+  S.name = name;
+  send({ type: 'join', name, key: SESSION_KEY });
   S.joined = true;
   nameInput.blur();
   $('login').classList.add('hidden');

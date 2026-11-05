@@ -204,6 +204,22 @@ html, body {
 #joinbtn:hover { filter: brightness(1.1); }
 #joinbtn:disabled { opacity: .5; cursor: default; }
 #loginmsg { min-height: 20px; margin-top: 8px; font-size: 13px; color: var(--danger); }
+/* ── 재연결 ── */
+#reconnect {
+  position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 20;
+  display: flex; align-items: center; gap: 12px; padding: 16px 24px; border-radius: 12px;
+  background: rgba(10, 12, 18, .9); border: 1px solid rgba(255, 209, 102, .5); font-weight: 700;
+}
+.spinner {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.2); border-top-color: #ffd166; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#mobilewarn {
+  margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px;
+  background: rgba(255, 90, 90, .12); border: 1px solid rgba(255, 90, 90, .45); color: #ffb3b3;
+}
+
 /* ── 초대 주소 (서버를 켠 PC에서만 보임) ── */
 .invite {
   margin-top: 14px; padding: 10px 12px; text-align: left; border-radius: 10px;

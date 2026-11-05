@@ -230,7 +230,7 @@ function fire(p, m) {
       if (q && q !== p && q.alive && Number.isFinite(t) && t <= wr.t + 0.6 && t <= w.range + 0.5) {
         const hx = ox + dx * t, hy = oy + dy * t, hz = oz + dz * t;
         const d = Math.hypot(hx - q.x, hy - q.y, hz - (q.z + 1));
-        if (d < 2.4) {
+        if (d < 3.2) { // 인터넷 지연을 감안한 허용 오차
           endT = t; type = 2;
           const cur = dmgMap.get(q) || { dmg: 0, x: hx, y: hy, z: hz };
           cur.dmg += w.dmg;
@@ -304,10 +304,32 @@ function handle(p, m) {
     case 'join': {
       if (p.joined) return;
       p.name = sanitizeName(m.name) || `플레이어${p.id}`;
+      p.key = typeof m.key === 'string' ? m.key.slice(0, 64) : '';
+      let resumed = false;
+      if (p.key) {
+        // 같은 키로 아직 남아 있는 옛 연결(반쯤 끊긴 연결)이 있으면 넘겨받고 정리
+        for (const q of players.values()) {
+          if (q !== p && q.joined && q.key === p.key) {
+            Object.assign(p, { kills: q.kills, deaths: q.deaths, color: q.color });
+            q.joined = false;
+            q.replaced = true;
+            q.ws.terminate();
+            resumed = true;
+          }
+        }
+        // 최근에 끊긴 사람이면 점수와 색을 이어받음
+        const s = sessions.get(p.key);
+        if (!resumed && s && s.expireAt > Date.now()) {
+          Object.assign(p, { kills: s.kills, deaths: s.deaths, color: s.color });
+          resumed = true;
+        }
+        sessions.delete(p.key);
+      }
       p.joined = true;
       spawn(p);
       rosterDirty = true;
-      sys(`${p.name} 님이 입장했습니다`);
+      sys(resumed ? `${p.name} 님이 다시 연결했습니다` : `${p.name} 님이 입장했습니다`);
+      log(`[${resumed ? '재접속' : '입장'}] ${p.name} (${p.via})`);
       break;
     }
     case 'st': {
@@ -400,32 +422,78 @@ setInterval(() => {
 }, TICK_MS);
 
 // ───────────────────────── 접속 ─────────────────────────
+const sessions = new Map(); // 재접속용: key → { kills, deaths, color, expireAt }
+const SESSION_KEEP_MS = 60000;
+const HEARTBEAT_MS = 5000;
+const DEAD_AFTER_MS = 20000;
+
+function log(text) {
+  const t = new Date().toTimeString().slice(0, 8);
+  console.log(`  ${t} ${text}`);
+}
+
+const CLOSE_REASONS = {
+  1000: '정상 종료',
+  1001: '창을 닫았거나 새로고침함',
+  1005: '이유 없이 종료',
+  1006: '네트워크가 끊김',
+  1009: '메시지가 너무 큼',
+  1011: '서버 오류',
+};
+
 const wss = new WebSocketServer({ server, maxPayload: 16 * 1024 });
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   const id = nextId++;
+  const ra = req.socket.remoteAddress || '';
+  const via = req.headers['cf-connecting-ip'] ? '인터넷'
+    : (ra === '127.0.0.1' || ra === '::1' || ra === '::ffff:127.0.0.1') ? '이 PC' : '같은 네트워크';
   const p = {
-    id, ws, name: '', joined: false, color: colorFor(id),
+    id, ws, via, key: '', name: '', joined: false, color: colorFor(id),
     x: 32, y: 32, z: 0, yaw: 0, hp: G.MAX_HP, alive: false, kills: 0, deaths: 0,
     inv: [null, null, null], slot: 0, lastShot: 0, reloadUntil: 0, reloadTotal: 0, reloadSlot: 0,
-    respawnAt: 0, spawnSeq: 0, protectUntil: 0, ackFs: 0,
+    respawnAt: 0, spawnSeq: 0, protectUntil: 0, ackFs: 0, lastSeen: Date.now(),
   };
   players.set(id, p);
   send(p, { type: 'welcome', id, color: p.color });
 
+  ws.on('pong', () => { p.lastSeen = Date.now(); });
   ws.on('message', (data) => {
+    p.lastSeen = Date.now();
     let m;
     try { m = JSON.parse(data); } catch { return; }
-    handle(p, m);
-  });
-  ws.on('close', () => {
-    players.delete(id);
-    if (p.joined) {
-      sys(`${p.name} 님이 나갔습니다`);
-      rosterDirty = true;
+    try {
+      handle(p, m);
+    } catch (err) {
+      log(`[오류] ${p.name || id}의 메시지 처리 중: ${err.message}`);
     }
   });
-  ws.on('error', () => {});
+  ws.on('close', (code) => {
+    players.delete(id);
+    if (!p.joined || p.replaced) return;
+    const normal = code === 1000 || code === 1001;
+    if (p.key) sessions.set(p.key, { kills: p.kills, deaths: p.deaths, color: p.color, expireAt: Date.now() + SESSION_KEEP_MS });
+    sys(normal ? `${p.name} 님이 나갔습니다` : `${p.name} 님의 연결이 끊어졌습니다`);
+    const why = p.timedOut ? `${DEAD_AFTER_MS / 1000}초간 응답 없음` : (CLOSE_REASONS[code] || '알 수 없음');
+    log(`[${normal ? '퇴장' : '끊김'}] ${p.name} (${p.via}) - 코드 ${code}, ${why}`);
+    rosterDirty = true;
+  });
+  ws.on('error', (err) => log(`[연결 오류] ${p.name || id}: ${err.message}`));
 });
+
+// 하트비트: 응답이 없는 연결(반쯤 끊긴 연결)을 정리해서 맵에 멈춘 유령 플레이어가 남지 않게 함
+setInterval(() => {
+  const now = Date.now();
+  for (const p of players.values()) {
+    if (p.ws.readyState !== 1) continue;
+    if (now - p.lastSeen > DEAD_AFTER_MS) {
+      p.timedOut = true;
+      p.ws.terminate();
+      continue;
+    }
+    try { p.ws.ping(); } catch { /* 무시 */ }
+  }
+  for (const [k, s] of sessions) if (s.expireAt < now) sessions.delete(k);
+}, HEARTBEAT_MS);
 
 // ws는 http 서버의 오류를 그대로 다시 내보내므로, 처리는 아래 server 'error'에서 함
 wss.on('error', () => {});
@@ -494,7 +562,9 @@ function startTunnel() {
     child = null;
   }
   if (!child) return tunnelFailed();
-  let log = '';
+  let cfOut = '';
+  let lineBuf = '';
+  let lastErrAt = 0;
   let candidate = null;
   let announced = false;
   let fallbackTimer = null;
@@ -512,22 +582,34 @@ function startTunnel() {
     console.log(`  ${line}\n`);
   };
   const onData = (buf) => {
-    log = (log + String(buf)).slice(-4000);
+    const text = String(buf);
+    cfOut = (cfOut + text).slice(-4000);
     if (!candidate) {
-      const m = log.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      const m = cfOut.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
       if (m) {
         candidate = m[0];
         fallbackTimer = setTimeout(announce, 15000);
       }
     }
-    if (candidate && /Registered tunnel connection/i.test(log)) announce();
+    if (candidate && /Registered tunnel connection/i.test(cfOut)) announce();
+    // 연결된 뒤 터널 쪽 오류는 서버 창에 남김 (끊김 원인 파악용, 초당 1줄 제한)
+    lineBuf += text;
+    const lines = lineBuf.split(/\r?\n/);
+    lineBuf = lines.pop();
+    for (const ln of lines) {
+      if (!announced || !/\bERR\b/.test(ln)) continue;
+      const now = Date.now();
+      if (now - lastErrAt < 1000) continue;
+      lastErrAt = now;
+      log(`[터널] ${ln.replace(/^\S+\s+ERR\s+/, '').slice(0, 160)}`);
+    }
   };
   child.stdout.on('data', onData);
   child.stderr.on('data', onData);
   child.on('error', () => tunnelFailed());
   child.on('exit', () => {
     if (tunnelUrl) console.log('\n  [알림] 인터넷 터널이 끊겼습니다. 서버를 다시 켜 주세요. (같은 네트워크 접속은 계속 가능)\n');
-    else if (!announced) tunnelFailed(log);
+    else if (!announced) tunnelFailed(cfOut);
     tunnelUrl = null;
   });
   const kill = () => { try { child.kill(); } catch { /* 이미 종료됨 */ } };
@@ -536,11 +618,11 @@ function startTunnel() {
 }
 
 let tunnelFailReported = false;
-function tunnelFailed(log = '') {
+function tunnelFailed(output = '') {
   if (tunnelFailReported) return;
   tunnelFailReported = true;
   console.log('  [실패] 인터넷 주소를 만들지 못했습니다. 같은 네트워크 접속은 계속 가능합니다.');
-  if (!log) console.log('  cloudflared가 설치되어 있지 않다면: winget install --id Cloudflare.cloudflared -e');
+  if (!output) console.log('  cloudflared가 설치되어 있지 않다면: winget install --id Cloudflare.cloudflared -e');
   else console.log('  인터넷 연결을 확인하거나 잠시 후 다시 실행해 보세요.');
   console.log('');
 }
