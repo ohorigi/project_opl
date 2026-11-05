@@ -425,7 +425,7 @@ setInterval(() => {
 const sessions = new Map(); // 재접속용: key → { kills, deaths, color, expireAt }
 const SESSION_KEEP_MS = 60000;
 const HEARTBEAT_MS = 5000;
-const DEAD_AFTER_MS = 20000;
+const DEAD_AFTER_MS = 12000;
 
 function log(text) {
   const t = new Date().toTimeString().slice(0, 8);
@@ -439,6 +439,7 @@ const CLOSE_REASONS = {
   1006: '네트워크가 끊김',
   1009: '메시지가 너무 큼',
   1011: '서버 오류',
+  4001: '보낸 데이터가 서버에 닿지 않아 클라이언트가 재연결함',
 };
 
 const wss = new WebSocketServer({ server, maxPayload: 16 * 1024 });

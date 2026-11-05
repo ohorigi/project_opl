@@ -24,6 +24,7 @@ const S = {
   remotes: new Map(), roster: new Map(), pickups: new Map(),
   nextFireAt: 0, lastReloadReq: 0, lastSend: 0, killerName: '',
   name: '', clockOff: null, reconnectTries: 0,
+  lastPongAt: 0, lastSnapAt: 0, firstUnackedAt: 0, lastPingAt: 0,
 };
 // 탭마다 고유한 키: 연결이 끊겼다 다시 붙으면 서버가 점수/색을 이어줌
 const SESSION_KEY = (() => {
@@ -574,7 +575,8 @@ function startReconnect(code) {
 }
 async function tryReconnect(code) {
   S.reconnectTries++;
-  $('reconnectmsg').textContent = `연결이 끊겨 다시 연결하는 중... (${S.reconnectTries}/${RECONNECT_MAX})`;
+  const why = code === 4001 ? '연결이 불안정해' : '연결이 끊겨';
+  $('reconnectmsg').textContent = `${why} 다시 연결하는 중... (${S.reconnectTries}/${RECONNECT_MAX})`;
   try {
     await connect();
   } catch {
@@ -583,6 +585,7 @@ async function tryReconnect(code) {
     return;
   }
   send({ type: 'join', name: S.name, key: SESSION_KEY });
+  markLinkFresh();
   $('reconnect').classList.add('hidden');
   addChat(null, null, '다시 연결되었습니다');
 }
@@ -594,7 +597,39 @@ function giveUpReconnect(code) {
   $('joinbtn').disabled = false;
   $('loginmsg').textContent = `서버에 다시 연결하지 못했습니다 (코드 ${code}). 서버가 켜져 있는지 확인하고 다시 입장하세요.`;
 }
-setInterval(() => { if (S.joined) send({ type: 'ping', t: performance.now() }); }, 2000);
+/* ── 연결 감시: 받기만 되고 보내기가 막힌 '반쪽 연결'을 찾아 스스로 재연결 ── */
+const PONG_TIMEOUT_MS = 7000;   // 이 시간 동안 핑 응답이 없으면
+const SNAP_TIMEOUT_MS = 5000;   // 이 시간 동안 서버 화면 정보가 없으면
+const UNACKED_SHOT_MS = 3000;   // 쏜 총알이 이 시간 동안 서버에 확인되지 않으면
+function markLinkFresh() {
+  const now = performance.now();
+  S.lastPongAt = now;
+  S.lastSnapAt = now;
+  S.firstUnackedAt = 0;
+}
+function forceReconnect(code) {
+  const old = S.ws;
+  S.ws = null;
+  S.connected = false;
+  if (old) {
+    old.onclose = old.onmessage = old.onerror = null;
+    try { old.close(code, 'stalled'); } catch { /* 이미 닫힘 */ }
+  }
+  startReconnect(code);
+}
+setInterval(() => {
+  if (!S.joined || !S.connected) return;
+  const now = performance.now();
+  if (now - S.lastPingAt >= 2000) { S.lastPingAt = now; send({ type: 'ping', t: now }); }
+  if (document.visibilityState !== 'visible') return; // 백그라운드 탭은 타이머가 느려지므로 판단하지 않음
+  const stalled = now - S.lastPongAt > PONG_TIMEOUT_MS
+    || now - S.lastSnapAt > SNAP_TIMEOUT_MS
+    || (S.firstUnackedAt && now - S.firstUnackedAt > UNACKED_SHOT_MS);
+  if (stalled) forceReconnect(4001);
+}, 500);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') markLinkFresh();
+});
 
 function nameOf(id) {
   const r = S.roster.get(id);
@@ -664,7 +699,10 @@ function onMessage(m) {
       break;
     case 'chat': addChat(m.name, m.color, m.text); break;
     case 'sys': addChat(null, null, m.text); break;
-    case 'pong': S.ping = Math.round(performance.now() - m.t); break;
+    case 'pong':
+      S.lastPongAt = performance.now();
+      S.ping = Math.round(S.lastPongAt - m.t);
+      break;
   }
 }
 
@@ -735,6 +773,9 @@ function onSnap(m) {
   const mm = m.me;
   S.inv = mm.inv.map((a) => (a ? { kind: WK[a[0]], mag: a[1], reserve: a[2] } : null));
   if (now > S.slotLockUntil) S.slot = mm.slot;
+  S.lastSnapAt = now;
+  if (mm.ack >= S.fs) S.firstUnackedAt = 0;         // 쏜 총알이 모두 서버에 도착함
+  else if (mm.ack > S.ack) S.firstUnackedAt = now;  // 일부 도착: 남은 것 기준으로 다시 잼
   S.ack = mm.ack;
   S.reloadEnd = mm.rl ? now + mm.rl : 0;
   S.reloadTotal = mm.rt || 1;
@@ -862,6 +903,7 @@ function tryFire(now) {
     return;
   }
   S.nextFireAt = now + w.interval * 1000;
+  if (S.fs === S.ack) S.firstUnackedAt = now;
   S.fs++;
 
   const { ox, oy, oz, yaw, pitch } = aimAngles();
@@ -1075,6 +1117,7 @@ function updateHUD(now) {
   }
   setText($('floor'), 'floor', G.floorLabel(me.z));
   setText($('ping'), 'ping', `${S.ping} ms`);
+  $('ping').classList.toggle('bad', S.ping > 250);
 
   for (let i = 0; i < 3; i++) {
     const it = S.inv[i];
@@ -1443,6 +1486,7 @@ async function join() {
   try { localStorage.setItem('opl_name', name); } catch { /* 무시 */ }
   S.name = name;
   send({ type: 'join', name, key: SESSION_KEY });
+  markLinkFresh();
   S.joined = true;
   nameInput.blur();
   $('login').classList.add('hidden');
