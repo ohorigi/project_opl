@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>개선OPL</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232b6cb0'/%3E%3Ctext x='16' y='22' font-size='14' font-family='Arial' font-weight='700' text-anchor='middle' fill='white'%3EOPL%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%23232a1e'/%3E%3Crect x='2' y='7' width='11' height='2' fill='%23d8b24a'/%3E%3Crect x='4' y='9' width='2' height='4' fill='%23d8b24a'/%3E%3Crect x='12' y='6' width='2' height='1' fill='%23e8e2d0'/%3E%3C/svg%3E">
+  <link rel="preload" href="/fonts/Galmuri11.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/style.css">
-  <script type="importmap">{ "imports": { "three": "/lib/three.module.js" } }</script>
+  <script type="importmap">{ "imports": { "three": "/lib/three.module.js", "three/addons/": "/jsm/" } }</script>
 </head>
 <body>
   <canvas id="view"></canvas>
@@ -24,25 +25,35 @@
     </div>
 
     <div id="hpbox">
-      <div class="hpnum"><span id="hpval">100</span><small>HP</small></div>
-      <div class="hpbar"><i id="hpfill"></i></div>
+      <img id="myportrait" alt="">
+      <div class="hpmain">
+        <div class="hpnum"><span id="hpval">100</span><small>HP</small></div>
+        <div class="hpbar"><i id="hpfill"></i></div>
+        <div id="kdbox">처치 <b id="kills">0</b> · 사망 <b id="deaths">0</b> · K/D <b id="kdr">0.00</b></div>
+      </div>
     </div>
+
+    <div id="protbar"></div>
+    <div id="stagebar" class="hidden"></div>
+    <div id="bossbar" class="hidden"><div class="bosshead"><img src="/sprites/boss_bust.png" alt=""><b id="bossname"></b><span id="bosshp"></span></div><div class="bossbg"><i id="bossfill"></i></div></div>
+    <div id="banner"><div id="bannertitle"></div><div id="bannersub"></div></div>
 
     <div id="invwrap">
       <div id="hint"></div>
       <div id="inv">
-        <div class="slot" data-i="0"><b class="key">1</b><span class="wname">-</span><span class="ammo"></span></div>
-        <div class="slot" data-i="1"><b class="key">2</b><span class="wname">-</span><span class="ammo"></span></div>
-        <div class="slot" data-i="2"><b class="key">3</b><span class="wname">-</span><span class="ammo"></span></div>
+        <div class="slot" data-i="0"><b class="key">1</b><img class="wicon" alt=""><span class="wname">-</span><span class="ammo"></span></div>
+        <div class="slot" data-i="1"><b class="key">2</b><img class="wicon" alt=""><span class="wname">-</span><span class="ammo"></span></div>
+        <div class="slot" data-i="2"><b class="key">3</b><img class="wicon" alt=""><span class="wname">-</span><span class="ammo"></span></div>
       </div>
       <div id="wstats"></div>
     </div>
+    <div id="nadebox"><b class="key">G</b><i class="nadeicon"></i><span>수류탄</span><b id="nadecount">3</b></div>
 
-    <div id="keys">WASD 이동 · 좌클릭 발사 · 1/2/3 무기 · R 재장전 · E 줍기/교체 · 우클릭 멀리보기 · 휠 줌 · Tab 점수 · Enter 채팅</div>
+    <div id="keys">WASD 이동 · Space 점프 · 좌클릭 발사 · G(휠클릭) 수류탄 · 1/2/3 무기 · R 재장전 · E 줍기/교체 · 우클릭 멀리보기 · 휠 줌 · Tab 점수 · Enter 채팅</div>
 
     <div id="crosshair"><i></i><i></i><i></i><i></i><b id="hitmark"></b><div id="reloadring"><div id="reloadfill"></div></div></div>
     <div id="vignette"></div>
-    <div id="death" class="hidden"><div class="dtitle">사망</div><div id="deathby"></div><div id="deathtimer"></div></div>
+    <div id="death" class="hidden"><div class="dtitle">사망</div><div id="deathby"></div><div id="deathkd"></div><div id="deathtimer"></div></div>
 
     <div id="scoreboard" class="hidden">
       <h2>점수판</h2>
@@ -56,20 +67,28 @@
   <div id="login">
     <div class="card">
       <h1>개선OPL</h1>
-      <p class="sub">쿼터뷰 멀티플레이</p>
+      <p class="sub">쿼터뷰 도트 멀티플레이</p>
+      <div class="label">모드</div>
+      <div id="modesel">
+        <button type="button" class="modebtn" data-mode="pvp"><b>PvP 대전</b><small>친구들과 서로 싸우기</small></button>
+        <button type="button" class="modebtn" data-mode="pve"><b>PvE 스테이지</b><small>함께 1-1 ~ 1-5 돌파, 보스 격파</small></button>
+      </div>
+      <div class="label">캐릭터 선택</div>
+      <div id="charsel"></div>
       <input id="nameinput" maxlength="12" placeholder="이름 (최대 12자)" autocomplete="off">
       <button id="joinbtn">입장</button>
       <div id="loginmsg"></div>
       <div id="mobilewarn" class="hidden">휴대폰·태블릿은 아직 조작을 지원하지 않습니다. 키보드와 마우스가 있는 PC로 접속해 주세요.</div>
       <div class="invite hidden"></div>
       <ul class="howto">
-        <li><b>WASD</b> 이동 · <b>마우스</b> 조준 · <b>좌클릭</b> 발사</li>
-        <li>바닥의 총을 밟으면 인벤토리(최대 3칸)에 들어갑니다</li>
-        <li><b>1 2 3</b> 무기 교체 · <b>R</b> 재장전 · <b>E</b> 가득 찼을 때 바닥 총과 교체</li>
-        <li>총마다 <b>데미지와 사거리</b>가 다릅니다 (발밑 원 = 사거리)</li>
-        <li>상자·벽 뒤에 숨으면 상대에게 보이지 않고 총알도 막힙니다</li>
-        <li><b>계단</b>으로 건물 옥상(2층)과 다리로 올라갈 수 있습니다</li>
-        <li>다른 층의 적은 마우스를 적 위에 올리면 조준됩니다</li>
+        <li><b>WASD</b> 이동 · <b>Space</b> 점프 · <b>마우스</b> 조준 · <b>좌클릭</b> 발사 · <b>G</b> 수류탄(3개)</li>
+        <li><b>PvE</b>: 구역마다 적을 모두 쓰러뜨리면 다음 스테이지로. 1-5에서 개틀링을 든 보스가 나옵니다 (빨간 레이저 = 저격수가 겨누는 중)</li>
+        <li>바닥의 총을 밟으면 인벤토리(최대 3칸)에 들어갑니다 · <b>1 2 3</b> 교체 · <b>R</b> 재장전 · <b>E</b> 바닥 총과 교체</li>
+        <li>조준점은 빨간색. 적 몸 위에 올리면 그 적을 정확히 겨눕니다 (건물 안·창문에서는 장애물에 막히는 사거리 원이 보임)</li>
+        <li><b>건물 안</b>에 들어갈 수 있습니다. 안에서는 창문·문으로 보이는 곳만 보이고, 밖에서는 창문 가까이 가야 안이 보입니다</li>
+        <li>상자·드럼통은 총이나 수류탄으로 <b>부술 수 있고</b>, 빨간 드럼통은 <b>폭발</b>합니다</li>
+        <li><b>점프</b>로 끊긴 다리·공중 발판·수로·울타리를 건너고, 노란 <b>점프 발판</b>은 옥상까지 날려 줍니다</li>
+        <li>죽으면 3초 뒤 무작위 위치에서 부활, <b>5초간 무적</b> (그동안 공격도 못 함)</li>
       </ul>
     </div>
   </div>
